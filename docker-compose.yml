@@ -1,0 +1,51 @@
+version: "3.9"
+
+services:
+  simvascular-xpra:
+    build: 
+      context: .
+      network: host
+    container_name: simvascular-xpra
+    restart: unless-stopped
+    networks:
+      - simvascular_net
+    expose:
+      - "10000"
+    volumes:
+      - /home/users/azhar/simv-projects:/home/sim/work
+    environment:
+      - XDG_RUNTIME_DIR=/run/user/1001
+    user: "1001:1001"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+    read_only: false
+    tmpfs:
+      - /tmp
+      - /var/tmp
+
+  simvascular-nginx:
+    image: nginx:latest
+    container_name: simvascular-nginx
+    restart: unless-stopped
+    networks:
+      - simvascular_net
+    ports:
+      - "172.20.23.20:80:80"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+    depends_on:
+      - simvascular-xpra
+    environment:
+      - NGINX_WORKER_PROCESSES=4
+
+networks:
+  simvascular_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.16.0/20

@@ -49,59 +49,43 @@ ENV QT_PLUGIN_PATH="${SV_HOME}/bin"
 ENV CTK_PLUGIN_PATH="${SV_HOME}/svExternals/lib/plugins"
 ENV MITK_PLUGIN_PATH="${SV_HOME}/svExternals/lib/plugins"
 
-# --- 7. Set Qt WebEngine path (search for it dynamically at runtime) ---
+# --- 7. Set Qt WebEngine path ---
 ENV QTWEBENGINEPROCESS_PATH="${SV_HOME}/bin/QtWebEngineProcess"
 
-# --- 7. Fix library paths - Add ALL potential library directories ---
+# --- 8. Fix library paths ---
 ENV LD_LIBRARY_PATH="${SV_HOME}/lib:${SV_HOME}/lib/plugins:${SV_HOME}/bin:${SV_HOME}/lib64:${SV_HOME}/lib/x86_64-linux-gnu:/usr/local/lib:/usr/lib:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}"
 
-# --- 8. Create wrapper script to find all SimVascular libraries ---
+# --- 9. Create wrapper script ---
 USER root
 RUN echo '#!/bin/bash\n\
 export DISPLAY=:0\n\
 export XDG_RUNTIME_DIR=/run/user/1001\n\
 \n\
-# Initialize with base library path\n\
 SV_LIB_PATH="${SV_HOME}/lib:${SV_HOME}/lib/plugins:${SV_HOME}/bin"\n\
 \n\
-# Find ALL directories containing .so files in SimVascular installation\n\
 echo "Searching for all library directories in ${SV_HOME}..."\n\
 while IFS= read -r libdir; do\n\
     SV_LIB_PATH="${libdir}:${SV_LIB_PATH}"\n\
 done < <(find ${SV_HOME} -type f -name "*.so*" -exec dirname {} \; 2>/dev/null | sort -u)\n\
 \n\
-# Update LD_LIBRARY_PATH with all found directories\n\
 export LD_LIBRARY_PATH="${SV_LIB_PATH}:${LD_LIBRARY_PATH}"\n\
 \n\
-# Find QtWebEngineProcess\n\
-echo ""\n\
-echo "Searching for QtWebEngineProcess..."\n\
 QTWEBENGINE=$(find ${SV_HOME} -type f -name "QtWebEngineProcess" 2>/dev/null | head -1)\n\
 if [ -n "$QTWEBENGINE" ]; then\n\
     export QTWEBENGINEPROCESS_PATH="$QTWEBENGINE"\n\
     echo "Found QtWebEngineProcess at: $QTWEBENGINE"\n\
 else\n\
-    echo "WARNING: QtWebEngineProcess not found - web features may not work"\n\
+    echo "WARNING: QtWebEngineProcess not found"\n\
 fi\n\
 \n\
-# Show available plugins\n\
-echo ""\n\
-echo "Checking for MITK plugins..."\n\
-if [ -d "${SV_HOME}/svExternals/lib/plugins" ]; then\n\
-    echo "Found plugins in svExternals:"\n\
-    ls -la "${SV_HOME}/svExternals/lib/plugins" | grep -E "org\\.mitk|liborg" | wc -l | xargs echo "  Plugin count:"\n\
-fi\n\
-if [ -d "${SV_HOME}/lib/plugins" ]; then\n\
-    echo "Found plugins in lib:"\n\
-    ls -la "${SV_HOME}/lib/plugins" | grep -E "org\\.sv|liborg" | wc -l | xargs echo "  Plugin count:"\n\
-fi\n\
-echo ""\n\
-echo "Final LD_LIBRARY_PATH configured."\n\
-echo ""\n\
-\n\
-# Start XPRA with SimVascular\n\
 exec xpra start --bind-tcp=0.0.0.0:10000 \\\n\
     --html=on \\\n\
+    --no-tray \\\n\
+    --system-tray=no \\\n\
+    --notifications=no \\\n\
+    --global-menus=no \\\n\
+    --desktop-fullscreen=yes \\\n\
+    --border=no \\\n\
     --start-child="openbox-session" \\\n\
     --start-child="${SV_HOME}/bin/simvascular" \\\n\
     --exit-with-children \\\n\
@@ -109,13 +93,13 @@ exec xpra start --bind-tcp=0.0.0.0:10000 \\\n\
     --no-daemon\n\
 ' > /usr/local/bin/start-simvascular.sh && chmod +x /usr/local/bin/start-simvascular.sh
 
-# --- 9. Switch to sim user ---
+# --- 10. Switch to sim user ---
 USER sim
 WORKDIR /home/sim/work
 ENV XDG_RUNTIME_DIR=/run/user/1001
 
-# --- 10. Expose XPRA web port ---
+# --- 11. Expose XPRA web port ---
 EXPOSE 10000
 
-# --- 11. Start with wrapper script ---
+# --- 12. Start with wrapper script ---
 CMD ["/usr/local/bin/start-simvascular.sh"]
