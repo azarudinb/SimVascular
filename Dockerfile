@@ -1,105 +1,97 @@
-# ============================================================
-# SimVascular + XPRA (Browser access)
-# Base: Ubuntu 24.04 LTS
-# ============================================================
 FROM ubuntu:24.04
 
-# --- 1. Install system dependencies ---
-RUN apt update && apt install -y software-properties-common \
-    && add-apt-repository ppa:deadsnakes/ppa \
-    && apt update && apt install -y \
-    sudo wget curl git python3.11 python3.11-dev python3.11-distutils python3-pip \
-    build-essential cmake \
-    xfce4-terminal dbus-x11 x11-utils \
-    xpra xvfb xauth x11-apps xdg-utils \
-    ffmpeg x264 libgl1 libglu1-mesa \
-    libxrender1 libxcomposite1 libxcursor1 libxi6 libxtst6 \
-    libsm6 libice6 libevent-dev libpcre2-dev libxcb-cursor0 \
-    libharfbuzz0b libharfbuzz-dev libfreetype6 libfontconfig1 \
-    libnss3 libnss3-dev libnspr4 libnspr4-dev \
-    libdbus-1-3 libxrandr2 libxss1 libasound2t64 libatk1.0-0t64 libatk-bridge2.0-0t64 \
-    libcups2t64 libdrm2 libgbm1 libgtk-3-0t64 libpango-1.0-0 libxdamage1 libxfixes3 \
-    libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
-    libxcb-shape0 libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 libxcb-xkb1 libxkbcommon-x11-0 \
-    openbox \
-    && apt clean && rm -rf /var/lib/apt/lists/*
+ENV DEBIAN_FRONTEND=noninteractive
+ENV XPRA_PORT=14500
 
-# --- 2. Add user ---
-RUN useradd -m sim && echo "sim:sim" | chpasswd && adduser sim sudo
-USER sim
-WORKDIR /home/sim
+# Install dependencies with retry logic
+RUN apt-get clean && \
+    (apt-get update --fix-missing || sleep 10 && apt-get update || sleep 20 && apt-get update) && \
+    apt-get install -y --no-install-recommends \
+    ca-certificates \
+    wget \
+    gnupg \
+    software-properties-common \
+    build-essential \
+    gfortran \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# --- 3. Copy and install SimVascular ---
-COPY SimVascular-Ubuntu-24-2025.08.25.deb /tmp/simvascular.deb
-USER root
-RUN apt update && apt install -y /tmp/simvascular.deb || apt -f install -y
-RUN rm /tmp/simvascular.deb
+# Install OpenMPI
+RUN apt-get update && apt-get install -y \
+    openmpi-bin \
+    openmpi-common \
+    libopenmpi-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# --- 4. Create workspace ---
-RUN mkdir -p /home/sim/work && chown -R sim:sim /home/sim/work
+# Install additional dependencies for SimVascular
+RUN apt-get update && apt-get install -y \
+    libharfbuzz-dev \
+    libxcb-cursor0 \
+    && rm -rf /var/lib/apt/lists/*
 
-# --- 5. Create XDG runtime directory for XPRA ---
-RUN mkdir -p /run/user/1001 && chown sim:sim /run/user/1001
+# Install XCB libraries
+RUN apt-get update && apt-get install -y \
+    '^libxcb.*-dev' \
+    libx11-xcb-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# --- 6. Set SimVascular environment ---
+# Copy and install SimVascular packages
+COPY SimVascular-Ubuntu-24-2025.08.25.deb /tmp/
+COPY svMultiPhysics-Ubuntu-24-2025.06.20.deb /tmp/
+COPY oneD-solver-Ubuntu-24-2025.07.02.deb /tmp/
+COPY svZeroDSolver-Ubuntu-24-2025-07-02.deb /tmp/
+RUN dpkg -i /tmp/SimVascular-Ubuntu-24-2025.08.25.deb /tmp/svMultiPhysics-Ubuntu-24-2025.06.20.deb /tmp/oneD-solver-Ubuntu-24-2025.07.02.deb /tmp/svZeroDSolver-Ubuntu-24-2025-07-02.deb || apt-get install -f -y && \
+    rm /tmp/*.deb
+
+
+
+# Install additional dependencies 
+RUN apt-get update && apt-get install -y \
+    xterm \
+    x11-apps \
+    python3 \
+    python3-dev \
+    libpython3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add Xpra repository and key
+RUN wget -q -O /usr/share/keyrings/xpra.asc https://xpra.org/xpra.asc && \
+    echo "deb [signed-by=/usr/share/keyrings/xpra.asc] https://xpra.org/ noble main" > /etc/apt/sources.list.d/xpra.list && \
+    apt-get update && apt-get install -y xpra && \
+    rm -rf /var/lib/apt/lists/*
+
+# Ensure HTML5 client directory exists before copying config
+RUN mkdir -p /etc/xpra/html5-client/
+COPY settings.txt /etc/xpra/html5-client/default-settings.txt
+
+# Set base SimVascular path (don't set Python env globally to avoid xpra conflicts)
 ENV SV_HOME=/usr/local/sv/simvascular/2025-08-25
-ENV PATH="${SV_HOME}/bin:${PATH}"
-ENV SV_PLUGIN_PATH="${SV_HOME}/lib/plugins:${SV_HOME}/svExternals/lib/plugins"
-ENV QT_PLUGIN_PATH="${SV_HOME}/bin"
-ENV CTK_PLUGIN_PATH="${SV_HOME}/svExternals/lib/plugins"
-ENV MITK_PLUGIN_PATH="${SV_HOME}/svExternals/lib/plugins"
 
-# --- 7. Set Qt WebEngine path ---
-ENV QTWEBENGINEPROCESS_PATH="${SV_HOME}/bin/QtWebEngineProcess"
+# Expose Xpra HTML5 port
+EXPOSE ${XPRA_PORT}
 
-# --- 8. Fix library paths ---
-ENV LD_LIBRARY_PATH="${SV_HOME}/lib:${SV_HOME}/lib/plugins:${SV_HOME}/bin:${SV_HOME}/lib64:${SV_HOME}/lib/x86_64-linux-gnu:/usr/local/lib:/usr/lib:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}"
+# Create projects directory and set as volume
+RUN mkdir -p /projects
+VOLUME ["/projects"]
 
-# --- 9. Create wrapper script ---
-USER root
+# Create startup script to set environment only for SimVascular
 RUN echo '#!/bin/bash\n\
-export DISPLAY=:0\n\
-export XDG_RUNTIME_DIR=/run/user/1001\n\
-\n\
-SV_LIB_PATH="${SV_HOME}/lib:${SV_HOME}/lib/plugins:${SV_HOME}/bin"\n\
-\n\
-echo "Searching for all library directories in ${SV_HOME}..."\n\
-while IFS= read -r libdir; do\n\
-    SV_LIB_PATH="${libdir}:${SV_LIB_PATH}"\n\
-done < <(find ${SV_HOME} -type f -name "*.so*" -exec dirname {} \; 2>/dev/null | sort -u)\n\
-\n\
-export LD_LIBRARY_PATH="${SV_LIB_PATH}:${LD_LIBRARY_PATH}"\n\
-\n\
-QTWEBENGINE=$(find ${SV_HOME} -type f -name "QtWebEngineProcess" 2>/dev/null | head -1)\n\
-if [ -n "$QTWEBENGINE" ]; then\n\
-    export QTWEBENGINEPROCESS_PATH="$QTWEBENGINE"\n\
-    echo "Found QtWebEngineProcess at: $QTWEBENGINE"\n\
-else\n\
-    echo "WARNING: QtWebEngineProcess not found"\n\
-fi\n\
-\n\
-exec xpra start --bind-tcp=0.0.0.0:10000 \\\n\
-    --html=on \\\n\
-    --no-tray \\\n\
-    --system-tray=no \\\n\
-    --notifications=no \\\n\
-    --global-menus=no \\\n\
-    --desktop-fullscreen=yes \\\n\
-    --border=no \\\n\
-    --start-child="openbox-session" \\\n\
-    --start-child="${SV_HOME}/bin/simvascular" \\\n\
-    --exit-with-children \\\n\
-    --daemon=no \\\n\
-    --no-daemon\n\
-' > /usr/local/bin/start-simvascular.sh && chmod +x /usr/local/bin/start-simvascular.sh
+export PYTHONHOME=${SV_HOME}/svExternals\n\
+export PYTHONPATH=${SV_HOME}/svExternals/lib/python3.11\n\
+export PATH="${SV_HOME}/bin:${SV_HOME}/svExternals/bin:/usr/bin:${PATH}"\n\
+export SV_PLUGIN_PATH="${SV_HOME}/lib/plugins:${SV_HOME}/svExternals/lib/plugins"\n\
+export QT_PLUGIN_PATH="${SV_HOME}/bin"\n\
+export QT_QPA_PLATFORM_PLUGIN_PATH="${SV_HOME}/bin/platforms"\n\
+export CTK_PLUGIN_PATH="${SV_HOME}/svExternals/lib/plugins"\n\
+export MITK_PLUGIN_PATH="${SV_HOME}/svExternals/lib/plugins"\n\
+export QTWEBENGINEPROCESS_PATH="${SV_HOME}/svExternals/bin/QtWebEngineProcess"\n\
+export LD_LIBRARY_PATH="${SV_HOME}/lib:${SV_HOME}/lib/plugins:${SV_HOME}/bin:${SV_HOME}/lib64:${SV_HOME}/lib/x86_64-linux-gnu:${SV_HOME}/svExternals/lib:${SV_HOME}/svExternals/lib/plugins:${SV_HOME}/svExternals/bin:/usr/local/lib:/usr/lib:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}"\n\
+export QT_QPA_PLATFORM=xcb\n\
+export QTWEBENGINE_CHROMIUM_FLAGS="--no-sandbox"\n\
+export OMPI_ALLOW_RUN_AS_ROOT=1\n\
+export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1\n\
+cd /projects\n\
+exec "${SV_HOME}/bin/simvascular" --qt-gui "$@"\n' > /usr/local/bin/start-simvascular.sh && \
+chmod +x /usr/local/bin/start-simvascular.sh
 
-# --- 10. Switch to sim user ---
-USER sim
-WORKDIR /home/sim/work
-ENV XDG_RUNTIME_DIR=/run/user/1001
-
-# --- 11. Expose XPRA web port ---
-EXPOSE 10000
-
-# --- 12. Start with wrapper script ---
-CMD ["/usr/local/bin/start-simvascular.sh"]
+# Start Xpra with SimVascular
+CMD ["sh", "-c", "xpra start --bind-tcp=0.0.0.0:14500 --html=on --start-child='/usr/local/bin/start-simvascular.sh' --daemon=no --tray=no --system-tray=no --notifications=no --sharing=yes --exit-with-client=no"]
