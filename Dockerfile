@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y \
 RUN apt-get update && apt-get install -y \
     libharfbuzz-dev \
     libxcb-cursor0 \
+    libopenblas0-pthread \
     && rm -rf /var/lib/apt/lists/*
 
 # Install XCB libraries
@@ -89,9 +90,10 @@ export QT_QPA_PLATFORM=xcb\n\
 export QTWEBENGINE_CHROMIUM_FLAGS="--no-sandbox"\n\
 export OMPI_ALLOW_RUN_AS_ROOT=1\n\
 export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1\n\
+export MPIEXEC=/usr/bin/mpiexec\n\
 cd /projects\n\
 exec "${SV_HOME}/bin/simvascular" --qt-gui "$@"\n' > /usr/local/bin/start-simvascular.sh && \
 chmod +x /usr/local/bin/start-simvascular.sh
 
 # Start Xpra with SimVascular
-CMD ["sh", "-c", "xpra start --bind-tcp=0.0.0.0:14500 --html=on --start-child='/usr/local/bin/start-simvascular.sh' --daemon=no --tray=no --system-tray=no --notifications=no --sharing=yes --exit-with-client=no"]
+CMD ["sh", "-c", "xpra start --bind-tcp=0.0.0.0:14500 --html=on --start-child='/usr/local/bin/start-simvascular.sh' --exit-with-children=yes --daemon=no --tray=no --system-tray=no --notifications=no --sharing=yes --exit-with-client=no --resize-display=yes --tray=no --system-tray=no --notifications=no"]
